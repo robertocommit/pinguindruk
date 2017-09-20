@@ -21,14 +21,17 @@ def main():
                     for page in page_response.json()['request']:
                         page_id = str(page['page_id'])
                         charge_url = 'https://pinguindruck.de/data/get-print-product/charge?type=json&page_id=' + page_id + '&exclude=price&ignore%5B%5D=charge'
-                        charge_response = requests.get(charge_url, cookies=page_response.cookies)
-                        price_url = 'https://pinguindruck.de/data/set-parameter?type=json&charge_id=211'
+                        charge_response = requests.get(charge_url, cookies=page_response.cookies).json()
+                        combination_ids = '%2C'.join([elem['combination_id'] for elem in charge_response['request']][0:4])
+                        price_url = 'https://pinguindruck.de/data/get-print-product/price?type=json&list=' + combination_ids
                         price_response = requests.get(price_url, cookies=cookies).json()
-                        try:
-                            print price_response['session']['item']['price']
-                        except:
-                            pass
-                        print 'nope'
+                        product_identifier = price_response['session']['item']['product']['identifier']
+                        format_identifier = price_response['session']['item']['format']['identifier']
+                        paper_identifier = price_response['session']['item']['paper']['identifier']
+                        color_identifier = price_response['session']['item']['color']['identifier']
+                        for charge in price_response['request']:
+                            print product_identifier, format_identifier, paper_identifier, color_identifier, charge['charge_id'], charge['price']['taxexcl']
+                        print ''
 
 
 if __name__ == '__main__':
