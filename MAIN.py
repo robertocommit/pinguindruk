@@ -19,8 +19,9 @@ def main():
 
 def extract_info():
     session.get(start_url)
-    formats = get_response(format_url, '', '')
+    formats = get_format_response()
     for index_format, format in enumerate(formats):
+        restart_session()
         print(str((len(formats) - index_format)) + ' formats to go')
         papers = get_response(paper_url, format, 'format_id')
         for index_paper, paper in enumerate(papers):
@@ -36,11 +37,18 @@ def extract_info():
                     yield generate_output(charge_response, price_response.json())
 
 
+def restart_session():
+    session.cookies.clear()
+    session.get(start_url)
+
+
+def get_format_response():
+    response = session.get(format_url).json()
+    return [elem for elem in response['request'] if 'standard' in elem['group']]
+
+
 def get_response(url, dict, key):
-    if dict == '':
-        url_complete = url
-    else:
-        url_complete = url % str(dict[key])
+    url_complete = url % str(dict[key])
     response = session.get(url_complete).json()
     return response['request']
 
