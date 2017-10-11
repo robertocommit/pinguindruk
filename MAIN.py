@@ -3,13 +3,7 @@ import pandas as pd
 
 csv_output = 'CSV/OUTPUT.csv'
 
-start_url = 'https://pinguindruck.de/shop/postkarten'
-format_url = 'https://pinguindruck.de/data/get-print-product/format?type=json'
-paper_url = 'https://pinguindruck.de/data/get-print-product/paper?type=json&format_id=%s&width=0&height=0'
-color_url = 'https://pinguindruck.de/data/get-print-product/color?type=json&paper_id=%s'
-page_url = 'https://pinguindruck.de/data/get-print-product/page?type=json&color_id=%s'
-charge_url = 'https://pinguindruck.de/data/get-print-product/charge?type=json&page_id=%s&exclude=price'
-price_url = 'https://pinguindruck.de/data/get-print-product/price?type=json&list=%s'
+start_url = 'https://pinguindruck.de/shop/klappkarten'
 
 
 def main():
@@ -19,22 +13,46 @@ def main():
 
 def extract_info():
     session.get(start_url)
-    formats = get_format_response()
-    for index_format, format in enumerate(formats):
+    format_response = session.post('https://pinguindruck.de/data/get-print-product/closedformat?type=json')
+    formats = format_response.json()['request']
+    for s, format in enumerate(formats):
+        print(str((len(formats) - s)) + ' formats to go')
         restart_session()
-        print(str((len(formats) - index_format)) + ' formats to go')
-        papers = get_response(paper_url, format, 'format_id')
-        for index_paper, paper in enumerate(papers):
-            print('     ' + str((len(papers) - index_paper)) + ' papers to go')
-            colors = get_response(color_url, paper, 'paper_id')
-            for index_color, color in enumerate(colors):
-                print('          ' + str((len(colors) - index_color)) + ' colors to go')
-                pages = get_response(page_url, color, 'color_id')
-                for index_page, page in enumerate(pages):
-                    print('               ' + str((len(pages) - index_page)) + ' pages to go')
-                    charge_response = get_response(charge_url, page, 'page_id')
-                    price_response = get_price_response(charge_response)
-                    yield generate_output(charge_response, price_response.json())
+        format_id = str(format['closedformat_id']) + ' ' + str(format['size_x']) + 'x' + str(format['size_y'])
+        session.post('https://pinguindruck.de/data/set-parameter?type=json&closedformat_id=%s' % format_id)
+        closedformatfoldings_response = session.post('https://pinguindruck.de/data/get-print-product/closedformatfoldings?type=json')
+        closedformatfoldings = closedformatfoldings_response.json()['request']['left']
+        for i, closedformat in enumerate(closedformatfoldings):
+            print('     ' + str((len(closedformatfoldings) - i)) + ' closedformatfoldings to go')
+            process_id = closedformat['process_id']
+            process_data = 'option1=' + closedformat['folding_code'] + ';option1=' + closedformat['folding_code'] + ';option1=' + closedformat['folding_code']
+            process_info = 'option1=' + closedformat['notation']['identifier'] + ';option1=' + closedformat['notation']['identifier'] + ';option1=' + closedformat['notation']['identifier']
+            folding_code = closedformat['folding_code']
+            folding_name = closedformat['notation']['text']
+            closedformat_id = closedformat['format_id']
+            width = closedformat['user_x']
+            height = closedformat['user_y']
+            session.post('https://pinguindruck.de/data/set-parameter?type=json&process_id=%s&process_data=%s&process_info=%s&folding_code=%s&format_id=%s&width=%s&height=%s' % (process_id, process_data, process_info, folding_code, closedformat_id, width, height))
+            paper_response = session.post('https://pinguindruck.de/data/get-print-product/paper?type=json&filter=prefill&closedformat_id=%s' % closedformat_id)
+            papers = paper_response.json()['request']
+            for x, paper in enumerate(papers):
+                print('          ' + str((len(papers) - x)) + ' papers to go')
+                paper_id = paper['paper_id']
+                session.post('https://pinguindruck.de/data/set-parameter?type=json&paper_id=%s&process_id=%s&process_data=%s&process_info=%s' % (paper_id, process_id, process_data.split(';')[0], process_info.split(';')[0]))
+                color_response = session.post('https://pinguindruck.de/data/get-print-product/color?type=json&paper_id=%s' % paper_id)
+                colors = color_response.json()['request']
+                for y, color in enumerate(colors):
+                    print('               ' + str((len(colors) - y)) + ' colors to go')
+                    color_id = color['color_id']
+                    page_response = session.post('https://pinguindruck.de/data/get-print-product/page?type=json&color_id=%s' % color_id)
+                    pages = page_response.json()['request']
+                    for z, page in enumerate(pages):
+                        print('                    ' + str((len(pages) - z)) + ' pages to go')
+                        page_id = page['page_id']
+                        charge_response = session.post('https://pinguindruck.de/data/get-print-product/charge?type=json&page_id=%s&exclude=price' % page_id)
+                        combination_id = '%2C'.join([elem['combination_id'] for elem in charge_response.json()['request']])
+                        prices_response = session.post('https://pinguindruck.de/data/get-print-product/price?type=json&list=%s' % combination_id)
+                        yield generate_output(charge_response.json(), prices_response.json(), folding_name)
 
 
 def restart_session():
@@ -42,37 +60,33 @@ def restart_session():
     session.get(start_url)
 
 
-def get_format_response():
-    response = session.get(format_url).json()
-    return [elem for elem in response['request'] if 'standard' in elem['group']]
-
-
-def get_response(url, dict, key):
-    url_complete = url % str(dict[key])
-    response = session.get(url_complete).json()
-    return response['request']
-
-
-def get_price_response(charge_response):
-    url = '%2C'.join([elem['combination_id'] for elem in charge_response])
-    return session.get(price_url % url)
-
-
-def generate_output(charge_response, price_response):
+def generate_output(charge_response, price_response, folding_name):
     product_identifier = price_response['session']['item']['product']['identifier']
     format_identifier = price_response['session']['item']['format']['identifier']
+    folding_identifier = folding_name
     paper_identifier = price_response['session']['item']['paper']['identifier']
     color_identifier = price_response['session']['item']['color']['identifier']
     temp_array = []
     for price in price_response['request']:
-        price_express, price_standard, price_economy = price['price']['taxexcl']['1'], price['price']['taxexcl']['3'], price['price']['taxexcl']['5']
+        try:
+            price_express = price['price']['taxexcl']['1']
+        except:
+            price_express = '/'
+        try:
+            price_standard = price['price']['taxexcl']['3']
+        except:
+            price_standard = '/'
+        try:
+            price_economy = price['price']['taxexcl']['5']
+        except:
+            price_economy = '/'
         quantity = get_charge_quantity(charge_response, price['charge_id'])
-        temp_array.append([product_identifier, format_identifier, paper_identifier, color_identifier, quantity, price_express, price_standard, price_economy])
-    return pd.DataFrame(temp_array, columns=['product', 'format', 'paper', 'color', 'charge', 'price_express', 'price_standard', 'price_economy'])
+        temp_array.append([product_identifier, format_identifier, folding_identifier, paper_identifier, color_identifier, quantity, price_express, price_standard, price_economy])
+    return pd.DataFrame(temp_array, columns=['product', 'format', 'folding', 'paper', 'color', 'charge', 'price_express', 'price_standard', 'price_economy'])
 
 
 def get_charge_quantity(charge_response, charge_id):
-    for charge in charge_response:
+    for charge in charge_response['request']:
         if charge['charge_id'] == charge_id:
             return charge['count']
 
